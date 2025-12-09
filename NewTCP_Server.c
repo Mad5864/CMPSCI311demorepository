@@ -1,5 +1,7 @@
-//Jaden's Rough Draft Code
+//CMPSC 311 FINAL PROJECT
+//Main Developers: Jaden Clay, Michael DeSalis, Ariana Sookoo
 // TCP server program
+
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
