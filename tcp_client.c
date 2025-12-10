@@ -91,7 +91,7 @@ int main(int argc, char *argv[])
 
     /* write a message to the server */
     pthread_t temp;
-    pthread_create(&temp, NULL, Read_For_Clients, (void *)&sockfd);
+    pthread_create(&temp, NULL, read_for_clients, (void *)&sockfd);
     // pthread_detach(temp);
 
     //Message Handling

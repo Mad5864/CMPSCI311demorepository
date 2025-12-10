@@ -31,7 +31,7 @@ void message_to_clients(char *message, int sender)
     pthread_mutex_lock(&mtx);
     for (int x = 0; x < Max_Client_Size; x++)
     {
-        if (clientNum[x] != 0 && clientNum[i] != sender)
+        if (clientNum[x] != 0 && clientNum[x] != sender)
         {
         send(clientNum[x], message, strlen(message), 0);
         }
@@ -57,7 +57,7 @@ void *read_for_clients(void *arg)
             remove_client(sockfd);
             break; 
         } else if (len < 0) {
-            perror("Error: Read failed.");
+            perror("Read failed.");
             close(sockfd);
             remove_client(sockfd);
             break; 
@@ -71,7 +71,7 @@ void *read_for_clients(void *arg)
 }
 
 // Function to remove a client from the clientNum array
-void remove_clients(int sockfd) {
+void remove_client(int sockfd) {
     pthread_mutex_lock(&mtx);
 
     for (int i = 0; i < Max_Client_Size; ++i) {
@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
 
     /* open a TCP socket (an Internet stream socket) */
     if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Error: Cannot open stream socket.");
+        perror("Cannot open stream socket.");
         exit(1);
     }
 
@@ -106,13 +106,14 @@ int main(int argc, char *argv[])
     serv_addr.sin_port = htons(port);
 
     if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0 ) {
-        perror("Error: Cannot bind local address.");
+        perror("Cannot bind local address.");
         exit(1);
     }
 
     //listen to the socket
     listen(sockfd, Max_Client_Size); // maximum number of clients
-    
+    printf("Server is listening on port %d\n", port);
+
     for (;;) {
         //wait for a connection from a client; this is an iterative server
         clilen = sizeof(cli_addr);
@@ -121,7 +122,7 @@ int main(int argc, char *argv[])
         *newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
 
         if (*newsockfd < 0) {
-            perror("Error: Cannot accept connection.");
+            perror("Cannot accept connection.");
             free(newsockfd); // free allocated memory on error
             continue;
         }
@@ -137,7 +138,7 @@ int main(int argc, char *argv[])
         }
 
         pthread_t temp;
-        pthread_create(&temp, NULL, Read_For_clients, (void*)&newsockfd);
+        pthread_create(&temp, NULL, read_for_clients, (void*)&newsockfd);
         pthread_detach(temp);
     }
     // close(newsockfd);
