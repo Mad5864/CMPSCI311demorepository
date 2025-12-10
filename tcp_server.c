@@ -1,6 +1,6 @@
 //CMPSC 311 FINAL PROJECT
 //Developers: Jaden Clay, Michael DeSalis, Ariana Sookoo
-//TCP server program
+// TCP server program
 
 #include <string.h>
 #include <stdio.h>
@@ -10,73 +10,36 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define SERV_TCP_PORT 5000 /* server's port number */
+#define SERV_TCP_PORT 5000
 #define MAX_SIZE 80
-#define Max_Client_Size 3
+#define MAX_CLIENT_SIZE 3
 
-// Array to hold client socket file descriptors
-int clientNum[Max_Client_Size] = {0}; 
+// Connected client sockets
+int clientNum[MAX_CLIENT_SIZE] = {0};
 static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
-// Global variables
-int sockfd, clilen, len, port;
-struct sockaddr_in cli_addr, serv_addr;
-char string[MAX_SIZE];
-
-// Function to send message to all connected clients
+// Broadcast a message to all clients except sender
 void message_to_clients(char *message, int sender)
 {
-    /* This first takes the given message then pthread_mutex_lock
-    is used to stop any race conditions then the message is written to each client. */
     pthread_mutex_lock(&mtx);
-    for (int x = 0; x < Max_Client_Size; x++)
+    for (int i = 0; i < MAX_CLIENT_SIZE; i++)
     {
-        if (clientNum[x] != 0 && clientNum[x] != sender)
+        if (clientNum[i] != 0 && clientNum[i] != sender)
         {
-        send(clientNum[x], message, strlen(message), 0);
+            send(clientNum[i], message, strlen(message), 0);
         }
     }
     pthread_mutex_unlock(&mtx);
 }
 
-// Function to read messages from clients, handle clients
-void *read_for_clients(void *arg)
+// Remove a disconnected client
+void remove_client(int sockfd)
 {
-    int sockfd = *(int*)arg;
-    free(arg); //frees up the memory that was malloc-ed
-
-    char string[MAX_SIZE];
-
-    for(;;)
-    {
-        int len = read(sockfd, string, sizeof(string)- 1);
-
-        if (len == 0) {
-            printf("Client disconnected.\n");
-            close(sockfd);
-            remove_client(sockfd);
-            break; 
-        } else if (len < 0) {
-            perror("Read failed.");
-            close(sockfd);
-            remove_client(sockfd);
-            break; 
-        }
-        string[len] = '\0';
-        printf("%s\n", string);
-
-        message_to_clients(string, sockfd);
-    }
-    return NULL;
-}
-
-// Function to remove a client from the clientNum array
-void remove_client(int sockfd) {
     pthread_mutex_lock(&mtx);
-
-    for (int i = 0; i < Max_Client_Size; ++i) {
-
-        if (clientNum[i] == sockfd) { // found the client to remove
+    for (int i = 0; i < MAX_CLIENT_SIZE; i++)
+    {
+        if (clientNum[i] == sockfd)
+        {
             clientNum[i] = 0;
             break;
         }
@@ -84,66 +47,100 @@ void remove_client(int sockfd) {
     pthread_mutex_unlock(&mtx);
 }
 
-int main(int argc, char *argv[]) 
+// Thread function: read from a specific client
+void *read_for_clients(void *arg)
 {
-    //command line: server [port_number]
+    int sockfd = *(int *)arg;
+    free(arg);
+
+    char msg[MAX_SIZE];
+
+    while (1)
+    {
+        int len = read(sockfd, msg, sizeof(msg) - 1);
+
+        if (len <= 0)
+        {
+            printf("Client disconnected.\n");
+            close(sockfd);
+            remove_client(sockfd);
+            return NULL;
+        }
+
+        msg[len] = '\0';
+        printf("%s\n", msg);
+        message_to_clients(msg, sockfd);
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    int sockfd, port;
+    struct sockaddr_in serv_addr, cli_addr;
+
     if (argc == 2)
-        sscanf(argv[1], "%d", &port); /* read the port number if provided */
-    else 
+        port = atoi(argv[1]);
+    else
         port = SERV_TCP_PORT;
 
-    /* open a TCP socket (an Internet stream socket) */
-    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Cannot open stream socket.");
+    // Create server socket
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0)
+    {
+        perror("Socket creation failed");
         exit(1);
     }
 
-    // bind the local address to the socket so that the client can send to the server
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-
+    // Configure server address
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     serv_addr.sin_port = htons(port);
 
-    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0 ) {
-        perror("Cannot bind local address.");
+    // Bind
+    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    {
+        perror("Bind failed");
         exit(1);
     }
 
-    //listen to the socket
-    listen(sockfd, Max_Client_Size); // maximum number of clients
-    printf("Server is listening on port %d\n", port);
+    // Listen
+    listen(sockfd, MAX_CLIENT_SIZE);
+    printf("Server listening on port %d\n", port);
 
-    for (;;) {
-        //wait for a connection from a client; this is an iterative server
-        clilen = sizeof(cli_addr);
-        
-        int *newsockfd = malloc(sizeof(int)); // allocate memory for each new socket file descriptor
-        *newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+    while (1)
+    {
+        socklen_t clilen = sizeof(cli_addr);
 
-        if (*newsockfd < 0) {
-            perror("Cannot accept connection.");
-            free(newsockfd); // free allocated memory on error
+        // Allocate new socket per client
+        int *newsockfd = malloc(sizeof(int));
+
+        *newsockfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
+        if (*newsockfd < 0)
+        {
+            perror("Accept failed");
+            free(newsockfd);
             continue;
         }
 
-        for (int x = 0; x < Max_Client_Size; x++)
+        // Add to client list
+        pthread_mutex_lock(&mtx);
+        for (int i = 0; i < MAX_CLIENT_SIZE; i++)
         {
-            if (clientNum[x] <= 0)
+            if (clientNum[i] == 0)
             {
-                clientNum[x] = newsockfd;
+                clientNum[i] = *newsockfd;
                 break;
             }
-            
         }
+        pthread_mutex_unlock(&mtx);
 
-        pthread_t temp;
-        pthread_create(&temp, NULL, read_for_clients, (void*)&newsockfd);
-        pthread_detach(temp);
+        // Create thread for the new client
+        pthread_t thread;
+        pthread_create(&thread, NULL, read_for_clients, newsockfd);
+        pthread_detach(thread);
     }
-    // close(newsockfd);
-}
 
-/*To run the server: 
-gcc tcp_server.c -lpthread -o server
-./tcp_server [port_number] */
+    close(sockfd);
+    return 0;
+}

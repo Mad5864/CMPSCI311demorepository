@@ -1,116 +1,110 @@
 //CMPSC 311 FINAL PROJECT
-//Main Developers: Jaden Clay, Michael DeSalis, Ariana Sookoo
-// TCP server program
+//Developers: Jaden Clay, Michael DeSalis, Ariana Sookoo
+// TCP client program
 
 #include <string.h>
 #include <stdio.h>
-#include <sys/types.h> 
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <netdb.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <stdlib.h>
 
-#define SERV_TCP_PORT 5000 /* server's port */
+#define SERV_TCP_PORT 5000
 #define Message 80
 
-
+// Thread function: read messages sent by server
 void *read_for_clients(void *arg)
 {
-    int sockfd = *(int*)arg;
+    int sockfd = *(int *)arg;
     char buf[Message];
 
-    int len;
-    for(;;)
+    while (1)
     {
-    len = read(sockfd, buf, sizeof(buf) - 1);
-    if (len <= 0)
-    {
-        printf("Error:");
-        exit(0);
+        int len = read(sockfd, buf, sizeof(buf) - 1);
+        if (len <= 0)
+        {
+            printf("\nServer disconnected.\n");
+            exit(0);
+        }
+        buf[len] = 0;
+        printf("\n%s\n", buf);
     }
-    buf[len] = 0;
-    printf("\n%s\n ", buf);
-    }
-    return NULL;
 }
 
 int main(int argc, char *argv[])
 {
     int sockfd;
     struct sockaddr_in serv_addr;
-    char *serv_host = "localhost";
-    struct hostent *host_ptr;
-    int port;
-    int buff_size = 0;
+    char *serv_host = "127.0.0.1";
+    int port = SERV_TCP_PORT;
 
-    /* command line: client [host [port]] */
-    if(argc >= 2)
-        serv_host = argv[1]; /* read the host if provided */
-    
-    if(strcmp(serv_host, "localhost") == 0)
-        serv_host = "127.0.0.1";
+    if (argc >= 2)
+        serv_host = argv[1];
+    if (argc == 3)
+        port = atoi(argv[2]);
 
-    if(argc == 3)
-        sscanf(argv[2], "%d", &port); /* read the port if provided */
-    else
-        port = SERV_TCP_PORT;
+    // Resolve host
+    struct hostent *host_ptr = gethostbyname(serv_host);
+    if (!host_ptr)
+    {
+        perror("gethostbyname error");
+        exit(1);
+    }
 
-    /* get the address of the host */
-    if((host_ptr = gethostbyname(serv_host)) == NULL) {
-     perror("gethostbyname error");
-     exit(1);
-  }
-
- 
-  if(host_ptr->h_addrtype !=  AF_INET) {
-     perror("Error: Unknown address type.");
-     exit(1);
-  }
-    /* build the server's Internet address */
-    bzero((char *) &serv_addr, sizeof(serv_addr));
+    // Build server address
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = ((struct in_addr *)host_ptr->h_addr_list[0])->s_addr;
+    serv_addr.sin_addr.s_addr =
+        ((struct in_addr *)host_ptr->h_addr_list[0])->s_addr;
     serv_addr.sin_port = htons(port);
 
-    /* open a TCP socket */
-    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("can't open stream socket");
+    // Create socket
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0)
+    {
+        perror("Cannot open socket");
         exit(1);
     }
 
-    /* connect to the server */
-    if(connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-        perror("can't connect to server");
+    // Connect
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    {
+        perror("Cannot connect to server");
         exit(1);
     }
+
     printf("Connected to server!\n");
 
-    /* write a message to the server */
-    pthread_t temp;
-    pthread_create(&temp, NULL, read_for_clients, (void *)&sockfd);
-    // pthread_detach(temp);
+    // Start read thread
+    pthread_t rthread;
+    pthread_create(&rthread, NULL, read_for_clients, &sockfd);
+    pthread_detach(rthread);
 
-    //Message Handling
-    char buf[Message];
+    // Username
     char username[20];
+    char buf[Message];
+    char formatted[Message + sizeof(username) + 4];     
 
     printf("Enter your username: ");
     fgets(username, sizeof(username), stdin);
+    username[strcspn(username, "\n")] = 0;
 
-
-    printf("Type Message: ");
-    for(;;)
+    // Message loop
+    while (1)
     {
-        fflush(stdout);
+        printf("Type message: ");
         fgets(buf, sizeof(buf), stdin);
-        username[strcspn(username, "\n")] = 0; // Remove newline character
-        buf[strcspn(buf, "\n")] = 0; // Remove newline character
+        buf[strcspn(buf, "\n")] = 0;
 
-        write(sockfd, buf, strlen(buf));
+        char formatted[Message + 20];
+        snprintf(formatted, sizeof(formatted), "%s: %s", username, buf);
+
+        write(sockfd, formatted, strlen(formatted));
     }
+
     close(sockfd);
 }
