@@ -1,6 +1,6 @@
 //CMPSC 311 FINAL PROJECT
-//Main Developers: Jaden Clay, Michael DeSalis, Ariana Sookoo
-// TCP server program
+//Developers: Jaden Clay, Michael DeSalis, Ariana Sookoo
+//TCP server program
 
 #include <string.h>
 #include <stdio.h>
@@ -10,166 +10,139 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define SERV_TCP_PORT 5000
-#define MAX_SIZE 200
+#define SERV_TCP_PORT 5000 /* server's port number */
+#define MAX_SIZE 80
 #define Max_Client_Size 3
 
-int clientNum[Max_Client_Size] = {0};
-char usernames[Max_Client_Size][50] = {0};
+// Array to hold client socket file descriptors
+int clientNum[Max_Client_Size] = {0}; 
+static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 
-pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+// Global variables
+int sockfd, clilen, len, port;
+struct sockaddr_in cli_addr, serv_addr;
+char string[MAX_SIZE];
 
-void Broadcast(char *message)
+// Function to send message to all connected clients
+void message_to_clients(char *message, int sender)
 {
+    /* This first takes the given message then pthread_mutex_lock
+    is used to stop any race conditions then the message is written to each client. */
     pthread_mutex_lock(&mtx);
-
-    for (int i = 0; i < Max_Client_Size; i++)
+    for (int x = 0; x < Max_Client_Size; x++)
     {
-        if (clientNum[i] > 0)
+        if (clientNum[x] != 0 && clientNum[i] != sender)
         {
-            write(clientNum[i], message, strlen(message));
+        send(clientNum[x], message, strlen(message), 0);
         }
     }
-
     pthread_mutex_unlock(&mtx);
 }
 
-void remove_client(int sockfd)
+// Function to read messages from clients, handle clients
+void *read_for_clients(void *arg)
 {
-    pthread_mutex_lock(&mtx);
-    for (int i = 0; i < Max_Client_Size; i++)
+    int sockfd = *(int*)arg;
+    free(arg); //frees up the memory that was malloc-ed
+
+    char string[MAX_SIZE];
+
+    for(;;)
     {
-        if (clientNum[i] == sockfd)
-        {
-            printf("User left: %s\n", usernames[i]);
+        int len = read(sockfd, string, sizeof(string)- 1);
 
-            char msg[200];
-            snprintf(msg, sizeof(msg), "%s has left the chat.\n", usernames[i]);
-            Broadcast(msg);
+        if (len == 0) {
+            printf("Client disconnected.\n");
+            close(sockfd);
+            remove_client(sockfd);
+            break; 
+        } else if (len < 0) {
+            perror("Error: Read failed.");
+            close(sockfd);
+            remove_client(sockfd);
+            break; 
+        }
+        string[len] = '\0';
+        printf("%s\n", string);
 
+        message_to_clients(string, sockfd);
+    }
+    return NULL;
+}
+
+// Function to remove a client from the clientNum array
+void remove_clients(int sockfd) {
+    pthread_mutex_lock(&mtx);
+
+    for (int i = 0; i < Max_Client_Size; ++i) {
+
+        if (clientNum[i] == sockfd) { // found the client to remove
             clientNum[i] = 0;
-            usernames[i][0] = '\0';
             break;
         }
     }
     pthread_mutex_unlock(&mtx);
 }
 
-void *Read_For_clients(void *arg)
+int main(int argc, char *argv[]) 
 {
-    int sockfd = *(int*)arg;
-    char buf[MAX_SIZE];
-    int len;
+    //command line: server [port_number]
+    if (argc == 2)
+        sscanf(argv[1], "%d", &port); /* read the port number if provided */
+    else 
+        port = SERV_TCP_PORT;
 
-    int index = -1;
-
-    // Find client index
-    pthread_mutex_lock(&mtx);
-    for (int i = 0; i < Max_Client_Size; i++)
-    {
-        if (clientNum[i] == sockfd)
-            index = i;
-    }
-    pthread_mutex_unlock(&mtx);
-
-    for (;;)
-    {
-        len = read(sockfd, buf, MAX_SIZE - 1);
-        if (len <= 0)
-        {
-            remove_client(sockfd);
-            close(sockfd);
-            pthread_exit(NULL);
-        }
-
-        buf[len] = 0;
-
-        // Username setup: "__username__:alice"
-        if (strncmp(buf, "__username__:", 13) == 0)
-        {
-            strcpy(usernames[index], buf + 13);
-            printf("User joined: %s\n", usernames[index]);
-
-            char joined[200];
-            snprintf(joined, sizeof(joined), "%s has joined the chat.\n", usernames[index]);
-            Broadcast(joined);
-
-            continue;
-        }
-
-        // Normal message
-        Broadcast(buf);
-    }
-
-    return NULL;
-}
-
-int main()
-{
-    int sockfd, newsockfd, clilen;
-    struct sockaddr_in cli_addr, serv_addr;
-
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
-    {
-        perror("cannot open socket");
+    /* open a TCP socket (an Internet stream socket) */
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Error: Cannot open stream socket.");
         exit(1);
     }
 
-    bzero((char *)&serv_addr, sizeof(serv_addr));
+    // bind the local address to the socket so that the client can send to the server
+    bzero((char *) &serv_addr, sizeof(serv_addr));
+
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(SERV_TCP_PORT);
+    serv_addr.sin_port = htons(port);
 
-    if (bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
-    {
-        perror("bind error");
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0 ) {
+        perror("Error: Cannot bind local address.");
         exit(1);
     }
 
-    listen(sockfd, Max_Client_Size);
-
-    printf("Server running on port %d...\n", SERV_TCP_PORT);
-
-    for (;;)
-    {
+    //listen to the socket
+    listen(sockfd, Max_Client_Size); // maximum number of clients
+    
+    for (;;) {
+        //wait for a connection from a client; this is an iterative server
         clilen = sizeof(cli_addr);
-        newsockfd = accept(sockfd, (struct sockaddr*)&cli_addr, &clilen);
+        
+        int *newsockfd = malloc(sizeof(int)); // allocate memory for each new socket file descriptor
+        *newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
 
-        if (newsockfd < 0)
-        {
-            perror("accept error");
+        if (*newsockfd < 0) {
+            perror("Error: Cannot accept connection.");
+            free(newsockfd); // free allocated memory on error
             continue;
         }
 
-        // Add to client list
-        pthread_mutex_lock(&mtx);
-        int placed = 0;
-        for (int i = 0; i < Max_Client_Size; i++)
+        for (int x = 0; x < Max_Client_Size; x++)
         {
-            if (clientNum[i] == 0)
+            if (clientNum[x] <= 0)
             {
-                clientNum[i] = newsockfd;
-                usernames[i][0] = '\0';
-                placed = 1;
+                clientNum[x] = newsockfd;
                 break;
             }
-        }
-        pthread_mutex_unlock(&mtx);
-
-        if (!placed)
-        {
-            char *full = "Server full.\n";
-            write(newsockfd, full, strlen(full));
-            close(newsockfd);
-            continue;
+            
         }
 
-        pthread_t t;
-        pthread_create(&t, NULL, Read_For_clients, (void*)&newsockfd);
-        pthread_detach(t);
+        pthread_t temp;
+        pthread_create(&temp, NULL, Read_For_clients, (void*)&newsockfd);
+        pthread_detach(temp);
     }
-
-    close(sockfd);
-    return 0;
+    // close(newsockfd);
 }
+
+/*To run the server: 
+gcc tcp_server.c -lpthread -o server
+./tcp_server [port_number] */
