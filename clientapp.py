@@ -89,9 +89,11 @@ def connect_to_server():
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((SERVER_HOST, SERVER_PORT))
-        connection_status = f"Connected as {username}"
+        #old connection_status = f"Connected as {username}"
+        connection_status = 'Connected'
         chat_history.append(("System", f"Successfully connected to {SERVER_HOST}:{SERVER_PORT}"))
-        
+        chat_history.append(("System", "Enter username..."))
+
         # Start the read thread
         threading.Thread(target=receive_messages, daemon=True).start()
         return True
@@ -167,6 +169,7 @@ def draw_input_box(surface):
 
 # --- Main Logic ---
 
+#as of now this function is unused
 def get_username_and_connect():
     """Initial step to get username before starting the Pygame window."""
     global username
@@ -179,8 +182,9 @@ def get_username_and_connect():
     return connect_to_server()
 
 def run_client():
-    global input_text, active_input, running, client_socket
+    global input_text, active_input, running, client_socket, username, connection_status
 
+    username_set = False
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -197,13 +201,21 @@ def run_client():
                 else:
                     active_input = False
 
+            #Put messages in chat unless a username has not be set
             if event.type == pygame.KEYDOWN and active_input:
                 if event.key == pygame.K_RETURN:
                     # Send the message
                     if input_text:
                         # Add to local history instantly
-                        chat_history.append((username, input_text)) 
-                        send_message(input_text)
+                        if username_set == False:
+                            username = input_text
+                            username_set = True
+                            connection_status = f'Connected as {username}'
+                            input_text = ""
+                            chat_history.append(("System", "Welcome to the chat!"))
+                        else:
+                            chat_history.append((username, input_text)) 
+                            send_message(input_text)
                         
                         input_text = "" # Clear input
                 elif event.key == pygame.K_BACKSPACE:
@@ -228,7 +240,9 @@ def run_client():
 
 if __name__ == "__main__":
     # 1. Connect and get username first
-    if get_username_and_connect():
+    #if get_username_and_connect():
+    #Relocated the username setup so it can be done in GUI
+    if connect_to_server():
         # 2. Run the main Pygame loop only if connection succeeds
         run_client()
     else:
